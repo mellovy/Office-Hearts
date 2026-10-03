@@ -9,6 +9,7 @@ const ROW_SPACING := 130.0
 const ORIGIN := Vector2(70, 70)
 
 var canvas: FlowCanvas
+var node_routes: Dictionary = {}
 var node_positions: Dictionary = {}
 
 
@@ -16,6 +17,7 @@ class FlowCanvas:
 	extends Control
 	var edges: Array = []
 	var positions: Dictionary = {}
+	var routes: Dictionary = {}
 
 	func _draw() -> void:
 		for edge in edges:
@@ -24,9 +26,10 @@ class FlowCanvas:
 			if a == Vector2.ZERO or b == Vector2.ZERO:
 				continue
 			var lit: bool = GameState.visited.has(edge[0]) and GameState.visited.has(edge[1])
-			var col: Color = Color(UIUtil.PINK_DEEP, 0.9) if lit else Color(UIUtil.PLUM_SOFT, 0.25)
-			var w := 3.0 if lit else 2.0
-			draw_line(a, b, col, w, true)
+			var route: String = routes.get(edge[1], "common")
+			var line_col: Color = UIUtil.route_color(route) if lit else Color(UIUtil.TEXT_MUTED, 0.4)
+			var w := 4.0 if lit else 2.0
+			draw_line(a, b, line_col, w, false)
 
 
 func _ready() -> void:
@@ -34,25 +37,30 @@ func _ready() -> void:
 
 
 func _build_ui() -> void:
-	add_child(UIUtil.bg_gradient(UIUtil.CREAM_DEEP, UIUtil.CREAM))
+	add_child(UIUtil.cute_bg())
 
+	# Back button, top-left.
 	var top_row := HBoxContainer.new()
 	top_row.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	top_row.offset_left = 20
 	top_row.offset_top = 16
 	top_row.offset_right = -20
-	top_row.add_theme_constant_override("separation", 16)
 	add_child(top_row)
 
-	var back_btn := UIUtil.button_style(UIUtil.PLUM_SOFT, UIUtil.PLUM_SOFT.lightened(0.1), UIUtil.PLUM_SOFT.darkened(0.1), 12)
-	back_btn.text = "← Back"
-	back_btn.custom_minimum_size = Vector2(110, 44)
+	var back_btn := UIUtil.pill_button("Back", 120, 46)
 	back_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
 	top_row.add_child(back_btn)
 
-	var title := UIUtil.heading("Story Flowchart", 26, UIUtil.PINK_DEEP)
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	top_row.add_child(title)
+	# Centered pixel title with hard drop-shadow.
+	var title_center := CenterContainer.new()
+	title_center.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	title_center.offset_left = 20
+	title_center.offset_top = 10
+	title_center.offset_right = -20
+	title_center.offset_bottom = 66
+	title_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title_center.add_child(UIUtil.title_label("STORY FLOWCHART", 24, UIUtil.TEXT_DARK))
+	add_child(title_center)
 
 	var scroll := ScrollContainer.new()
 	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -68,25 +76,40 @@ func _build_ui() -> void:
 
 	# Compute positions first (canvas needs them for edges).
 	for node in Story.FLOW_NODES:
+		node_routes[node["id"]] = node["route"]
 		var pos: Vector2 = ORIGIN + Vector2(node["col"] * COL_SPACING, node["row"] * ROW_SPACING)
 		node_positions[node["id"]] = pos + NODE_SIZE / 2.0
 
 	canvas.positions = node_positions
+	canvas.routes = node_routes
 	canvas.edges = Story.FLOW_EDGES
 
 	# Route legend.
 	var legend := HBoxContainer.new()
-	legend.position = Vector2(20, 590)
+	legend.position = Vector2(20, 586)
 	legend.add_theme_constant_override("separation", 24)
-	for route in ["arthur", "dante", "leo"]:
+	for route in ["common", "arthur", "dante", "leo"]:
 		var chip := HBoxContainer.new()
 		chip.add_theme_constant_override("separation", 6)
 		var dot := ColorRect.new()
 		dot.color = UIUtil.route_color(route)
 		dot.custom_minimum_size = Vector2(14, 14)
 		chip.add_child(dot)
-		chip.add_child(UIUtil.body_label(Story.ROUTE_NAMES.get(route, route), 13, UIUtil.PLUM))
+		var route_name: String = "Common" if route == "common" else Story.ROUTE_NAMES.get(route, route)
+		var lbl := UIUtil.body_label(route_name, 18, UIUtil.TEXT_DARK)
+		lbl.clip_text = false  # clip_text=true collapses min width to 1px
+		chip.add_child(lbl)
 		legend.add_child(chip)
+	var gold_chip := HBoxContainer.new()
+	gold_chip.add_theme_constant_override("separation", 6)
+	var gold_dot := ColorRect.new()
+	gold_dot.color = UIUtil.GOLD
+	gold_dot.custom_minimum_size = Vector2(14, 14)
+	gold_chip.add_child(gold_dot)
+	var gold_lbl := UIUtil.body_label("Unlocked Ending", 18, UIUtil.TEXT_DARK)
+	gold_lbl.clip_text = false  # clip_text=true collapses min width to 1px
+	gold_chip.add_child(gold_lbl)
+	legend.add_child(gold_chip)
 	canvas.add_child(legend)
 
 	# Nodes on top of the canvas.
@@ -95,27 +118,21 @@ func _build_ui() -> void:
 		var visited: bool = GameState.visited.has(id)
 		var is_ending: bool = id.ends_with("_end_good") or id.ends_with("_end_bad")
 		var route: String = node["route"]
-		var base_color: Color = UIUtil.route_color(route) if visited else Color(UIUtil.PLUM_SOFT, 0.35)
+		var base_color: Color = UIUtil.route_color(route) if visited else UIUtil.PANEL_CREAM
+		var unlocked: bool = is_ending and GameState.endings_unlocked.has(id)
+		var border_col: Color = UIUtil.GOLD if unlocked else UIUtil.BLACK
+		var border_w := 4 if unlocked else 3
 
 		var panel := PanelContainer.new()
-		var radius := 32 if is_ending else 14
-		var border_col := UIUtil.GOLD if (is_ending and GameState.endings_unlocked.has(id)) else Color(0, 0, 0, 0)
-		var border_w := 3 if (is_ending and GameState.endings_unlocked.has(id)) else 0
-		panel.add_theme_stylebox_override("panel", UIUtil.panel_style(base_color, radius, border_col, border_w))
+		panel.add_theme_stylebox_override("panel", UIUtil.panel_style(base_color, 0, border_col, border_w))
 		panel.position = ORIGIN + Vector2(node["col"] * COL_SPACING, node["row"] * ROW_SPACING)
 		panel.custom_minimum_size = NODE_SIZE
 		panel.size = NODE_SIZE
 
-		var lbl := Label.new()
-		lbl.text = node["label"]
+		var lbl := UIUtil.body_label(node["label"], 18, UIUtil.TEXT_DARK if visited else UIUtil.TEXT_MUTED)
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		lbl.add_theme_font_size_override("font_size", 13)
-		lbl.add_theme_color_override("font_color", UIUtil.CREAM if visited else Color(UIUtil.CREAM, 0.7))
-		var lmargin := MarginContainer.new()
-		lmargin.add_theme_constant_override("margin_left", 6)
-		lmargin.add_theme_constant_override("margin_right", 6)
+		var lmargin := UIUtil.margin(8, 4, 8, 4)
 		lmargin.add_child(lbl)
 		panel.add_child(lmargin)
 

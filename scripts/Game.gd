@@ -12,6 +12,7 @@ var char_idx: int = 0
 var type_speed: float = 0.018
 
 var bg_rect: ColorRect
+var top_panel: PanelContainer
 var title_label: Label
 var location_label: Label
 var bgm_label: Label
@@ -23,14 +24,57 @@ var hearts_box: HBoxContainer
 var heart_labels: Dictionary = {}
 var dialogue_panel: PanelContainer
 var click_catcher: Control
+var ff_btn: Button
 
 var type_timer: Timer
+var speed_mult: float = 1.0  # fast-forward multiplier (Timer has no speed_scale in 4.7)
+
+# Scene transition: fade to black, show a location/time card, fade back in.
+var transition_overlay: ColorRect
+var transition_card: VBoxContainer
+var card_place: Label
+var card_time: Label
+var transition_tween: Tween
+var transitioning: bool = false
+var _last_location: String = ""
+
+
+## Tiny pixel-art icon drawn with vector rects — floppy disk (save), folder
+## (load), double fast-forward triangles. No emoji — same hard-edge style.
+class PixelIcon:
+	extends Control
+	var kind: String = "save"
+	var icon_col: Color = UIUtil.TEXT_DARK
+
+	func _draw() -> void:
+		var s := size
+		match kind:
+			"save":  # floppy disk: outline body + inset shutter + label
+				draw_rect(Rect2(Vector2.ZERO, s), icon_col, false, 2.0)
+				draw_rect(Rect2(Vector2(s.x * 0.5, s.y * 0.15), Vector2(s.x * 0.3, s.y * 0.25)), icon_col, true)
+				draw_rect(Rect2(Vector2(s.x * 0.2, s.y * 0.55), Vector2(s.x * 0.6, s.y * 0.25)), icon_col, true)
+			"load":  # folder: outline body + tab
+				draw_rect(Rect2(Vector2(0, s.y * 0.25), Vector2(s.x, s.y * 0.65)), icon_col, false, 2.0)
+				draw_rect(Rect2(Vector2(s.x * 0.1, s.y * 0.05), Vector2(s.x * 0.4, s.y * 0.25)), icon_col, true)
+			"ff":  # double fast-forward triangles
+				draw_colored_polygon(PackedVector2Array([Vector2(0, 0), Vector2(0, s.y), Vector2(s.x * 0.42, s.y / 2.0)]), icon_col)
+				draw_colored_polygon(PackedVector2Array([Vector2(s.x * 0.55, 0), Vector2(s.x * 0.55, s.y), Vector2(s.x, s.y / 2.0)]), icon_col)
+
+
+## Center a PixelIcon of the given kind on a square-ish button.
+func _add_icon(btn: Button, kind: String) -> void:
+	var icon := PixelIcon.new()
+	icon.kind = kind
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.size = Vector2(16, 16)
+	icon.position = (btn.custom_minimum_size - icon.size) / 2.0
+	btn.add_child(icon)
 
 
 func _ready() -> void:
 	_build_ui()
 	GameState.points_changed.connect(_on_points_changed)
-	_load_chapter(GameState.current_chapter_id)
+	_load_chapter(GameState.current_chapter_id, GameState.current_line_idx)
 
 
 func _build_ui() -> void:
@@ -47,7 +91,7 @@ func _build_ui() -> void:
 	add_child(click_catcher)
 
 	# ---- Top bar ----
-	var top_panel := PanelContainer.new()
+	top_panel = PanelContainer.new()
 	top_panel.add_theme_stylebox_override("panel", UIUtil.panel_style(UIUtil.PANEL_DARK, 0, UIUtil.BLACK, 0))
 	top_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	top_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -99,7 +143,7 @@ func _build_ui() -> void:
 	dialogue_panel.offset_left = 40
 	dialogue_panel.offset_right = -40
 	dialogue_panel.offset_bottom = -30
-	dialogue_panel.offset_top = -230
+	dialogue_panel.offset_top = -250
 	add_child(dialogue_panel)
 
 	var dmargin := MarginContainer.new()
@@ -121,7 +165,7 @@ func _build_ui() -> void:
 
 	text_label = RichTextLabel.new()
 	text_label.bbcode_enabled = true
-	text_label.fit_content = true
+	text_label.fit_content = false  # fixed box height — don't grow with line length
 	text_label.scroll_active = false
 	text_label.custom_minimum_size = Vector2(0, 120)
 	text_label.add_theme_font_override("normal_font", UIUtil.FONT_BODY)
@@ -129,9 +173,33 @@ func _build_ui() -> void:
 	text_label.add_theme_color_override("default_color", UIUtil.TEXT_DARK)
 	dvbox.add_child(text_label)
 
+	# ---- Bottom row: continue hint + Save / Load / Fast-forward ----
+	var bottom_row := HBoxContainer.new()
+	bottom_row.add_theme_constant_override("separation", 10)
+	dvbox.add_child(bottom_row)
+
 	continue_hint = UIUtil.body_label("▼ click / space to continue", 16, UIUtil.TEXT_MUTED)
-	continue_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	dvbox.add_child(continue_hint)
+	continue_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bottom_row.add_child(continue_hint)
+
+	var save_btn := UIUtil.pill_button("", 46, 34)
+	save_btn.tooltip_text = "Save"
+	_add_icon(save_btn, "save")
+	save_btn.pressed.connect(func(): _open_slot_popup(true))
+	bottom_row.add_child(save_btn)
+
+	var load_btn := UIUtil.pill_button("", 46, 34)
+	load_btn.tooltip_text = "Load"
+	_add_icon(load_btn, "load")
+	load_btn.pressed.connect(func(): _open_slot_popup(false))
+	bottom_row.add_child(load_btn)
+
+	ff_btn = UIUtil.pill_button("", 46, 34)
+	ff_btn.toggle_mode = true
+	ff_btn.tooltip_text = "Fast forward (5x, auto-advance)"
+	_add_icon(ff_btn, "ff")
+	ff_btn.pressed.connect(_on_ff_toggled)
+	bottom_row.add_child(ff_btn)
 
 	# ---- Choice box (overlay, centered) ----
 	choice_box = VBoxContainer.new()
@@ -147,6 +215,46 @@ func _build_ui() -> void:
 	type_timer.one_shot = false
 	type_timer.timeout.connect(_on_type_tick)
 	add_child(type_timer)
+
+	# ---- Scene transition overlay (black + location card), always on top ----
+	transition_overlay = ColorRect.new()
+	transition_overlay.color = Color(UIUtil.BLACK)
+	transition_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	transition_overlay.modulate.a = 0.0
+	transition_overlay.visible = false
+	transition_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE  # clicks pass through; _advance skips
+	add_child(transition_overlay)
+
+	# card centered dead-middle of the screen
+	var card_center := CenterContainer.new()
+	card_center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	card_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	transition_overlay.add_child(card_center)
+
+	transition_card = VBoxContainer.new()
+	transition_card.alignment = BoxContainer.ALIGNMENT_CENTER
+	transition_card.add_theme_constant_override("separation", 18)
+	transition_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	transition_card.visible = false
+	card_center.add_child(transition_card)
+
+	card_place = Label.new()
+	card_place.add_theme_font_override("font", UIUtil.FONT_PIXEL)
+	card_place.add_theme_font_size_override("font_size", 16)
+	card_place.add_theme_color_override("font_color", UIUtil.CREAM)
+	card_place.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	card_place.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	card_place.custom_minimum_size = Vector2(560, 0)
+	transition_card.add_child(card_place)
+
+	card_time = Label.new()
+	card_time.add_theme_font_override("font", UIUtil.FONT_PIXEL)
+	card_time.add_theme_font_size_override("font_size", 11)
+	card_time.add_theme_color_override("font_color", UIUtil.GOLD)
+	card_time.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	transition_card.add_child(card_time)
+
+	# card self-sizes; the CenterContainer keeps it dead-center
 
 
 func _build_hearts() -> void:
@@ -183,7 +291,7 @@ func _on_points_changed(_c: String, _v: int) -> void:
 
 # ------------------------------------------------------------ chapter flow
 
-func _load_chapter(id: String) -> void:
+func _load_chapter(id: String, resume_line: int = 0) -> void:
 	if id == "game_end":
 		_show_end_screen()
 		return
@@ -207,12 +315,73 @@ func _load_chapter(id: String) -> void:
 	var tw := create_tween()
 	tw.tween_property(bg_rect, "color", Color(bg_hex), 0.6)
 
-	line_idx = 0
+	var lines: Array = chapter.get("lines", [])
+	line_idx = clamp(resume_line, 0, lines.size())
 	choice_box.visible = false
+	_play_transition()
+
+
+## Fade to black (hiding the HUD), show a location/time card when the setting
+## changed, then fade back in. Same-location chapters get a quick dip only.
+## Clicking / space during the transition skips it.
+func _play_transition() -> void:
+	var new_loc: String = chapter.get("location", "")
+	var changed := new_loc != _last_location
+	_last_location = new_loc
+
+	transitioning = true
+	type_timer.stop()
+	is_typing = false
+	continue_hint.visible = false
+
+	if changed:
+		var parts := new_loc.split("—")
+		if parts.size() > 1:
+			card_place.text = "—".join(parts.slice(0, parts.size() - 1)).strip_edges()
+			var t: String = parts[parts.size() - 1].strip_edges()
+			card_time.text = "~ %s ~" % t
+			card_time.visible = t != ""
+		else:
+			card_place.text = new_loc
+			card_time.visible = false
+		transition_card.visible = true
+
+	transition_overlay.visible = true
+	var long_fade := 0.5 if changed else 0.2
+	transition_tween = create_tween()
+	transition_tween.tween_property(transition_overlay, "modulate:a", 1.0, long_fade)
+	transition_tween.tween_callback(func(): _set_hud_visible(false))
+	if changed:
+		transition_tween.tween_interval(1.2)
+		transition_tween.tween_callback(func(): transition_card.visible = false)
+	transition_tween.tween_property(transition_overlay, "modulate:a", 0.0, 0.4)
+	transition_tween.tween_callback(_finish_transition)
+
+
+func _set_hud_visible(v: bool) -> void:
+	for node in [top_panel, dialogue_panel]:
+		if node:
+			node.visible = v
+
+
+func _finish_transition() -> void:
+	if transition_tween and transition_tween.is_valid():
+		transition_tween.kill()
+	transition_overlay.visible = false
+	transition_overlay.modulate.a = 0.0
+	transition_card.visible = false
+	_set_hud_visible(true)
+	transitioning = false
 	_show_current_line()
 
 
+func _skip_transition() -> void:
+	if transitioning:
+		_finish_transition()
+
+
 func _show_current_line() -> void:
+	GameState.current_line_idx = line_idx  # keep in sync so saves capture the exact spot
 	var lines: Array = chapter.get("lines", [])
 	if line_idx >= lines.size():
 		_on_lines_finished()
@@ -238,9 +407,13 @@ func _on_type_tick() -> void:
 		type_timer.stop()
 		is_typing = false
 		continue_hint.visible = true
+		if ff_btn != null and ff_btn.button_pressed and not transitioning:
+			get_tree().create_timer(0.3).timeout.connect(func():
+				if not transitioning:
+					_advance())
 		return
 	# advance a few chars at a time for snappier feel without skipping bbcode
-	char_idx = min(char_idx + 2, full_text.length())
+	char_idx = min(char_idx + int(2.0 * speed_mult), full_text.length())
 	text_label.text = full_text.substr(0, char_idx)
 
 
@@ -252,7 +425,19 @@ func _complete_typing() -> void:
 	continue_hint.visible = true
 
 
+func _on_ff_toggled(on: bool) -> void:
+	speed_mult = 5.0 if on else 1.0
+	# if toggled on while already waiting at a finished line, start advancing
+	if on and not is_typing and not choice_box.visible and not transitioning:
+		get_tree().create_timer(0.3).timeout.connect(func():
+			if not transitioning:
+				_advance())
+
+
 func _advance() -> void:
+	if transitioning:
+		_skip_transition()  # clicks/space skip the transition
+		return
 	if choice_box.visible:
 		return
 	if is_typing:
@@ -304,8 +489,8 @@ func _on_choice_selected(opt: Dictionary) -> void:
 	if ch != "" and pts != 0:
 		GameState.add_points(ch, pts)
 	choice_box.visible = false
-	GameState.save_game()
 	_load_chapter(String(opt.get("next", "game_end")))
+	GameState.save_game()  # after loading: save points at the next chapter's start, not a replayable choice
 
 
 func _on_scene_input(event: InputEvent) -> void:
@@ -373,7 +558,7 @@ func _open_slot_popup(is_save: bool) -> void:
 				var pause := get_node_or_null("PauseOverlay")
 				if pause:
 					pause.queue_free()
-				_load_chapter(GameState.current_chapter_id)
+				_load_chapter(GameState.current_chapter_id, GameState.current_line_idx)
 	, not is_save)
 	vbox.add_child(grid)
 

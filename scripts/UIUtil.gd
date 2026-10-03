@@ -350,15 +350,15 @@ static func slot_grid(slots: Array, on_pick: Callable, load_mode: bool) -> GridC
 
 
 ## Master-volume row: a label + an HSlider wired to the "Master" audio bus.
-static func volume_row() -> HBoxContainer:
+static func volume_row(bus_name: String = "Master") -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
 
-	var lbl := body_label("Master Volume", 20, TEXT_DARK)
+	var lbl := body_label(bus_name + " Volume", 20, TEXT_DARK)
 	lbl.custom_minimum_size = Vector2(160, 0)
 	row.add_child(lbl)
 
-	var bus := AudioServer.get_bus_index("Master")
+	var bus := AudioServer.get_bus_index(bus_name)
 	var slider := HSlider.new()
 	slider.min_value = 0.0
 	slider.max_value = 1.0
@@ -374,6 +374,12 @@ static func volume_row() -> HBoxContainer:
 	row.add_child(slider)
 	return row
 
+
+static func volume_row_music() -> HBoxContainer:
+	return volume_row("Music")
+
+static func volume_row_sfx() -> HBoxContainer:
+	return volume_row("SFX")
 
 static func route_color(route: String) -> Color:
 	match route:

@@ -14,6 +14,7 @@ var points: Dictionary = {
 }
 
 var current_chapter_id: String = "common_ch1"
+var current_line_idx: int = 0  # position within the current chapter (for exact save/resume)
 var current_slot: int = 1
 
 # Every chapter id the player has ever seen (for the flowchart map).
@@ -35,6 +36,7 @@ func _ready() -> void:
 func reset_new_game() -> void:
 	points = {"arthur": 0, "dante": 0, "leo": 0}
 	current_chapter_id = "common_ch1"
+	current_line_idx = 0
 	visited = {}
 	endings_unlocked = {}
 	found_flashdrive = false
@@ -102,6 +104,7 @@ func save_to_slot(slot: int) -> void:
 	var data := {
 		"points": points,
 		"current_chapter_id": current_chapter_id,
+		"current_line_idx": current_line_idx,
 		"visited": visited,
 		"endings_unlocked": endings_unlocked,
 		"found_flashdrive": found_flashdrive,
@@ -125,8 +128,12 @@ func load_from_slot(slot: int) -> bool:
 	f.close()
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return false
-	points = parsed.get("points", points)
+	var loaded_points: Dictionary = parsed.get("points", points)
+	for key in loaded_points.keys():
+		loaded_points[key] = int(loaded_points[key])  # JSON parses numbers as float
+	points = loaded_points
 	current_chapter_id = parsed.get("current_chapter_id", "common_ch1")
+	current_line_idx = int(parsed.get("current_line_idx", 0))
 	visited = parsed.get("visited", {})
 	endings_unlocked = parsed.get("endings_unlocked", {})
 	found_flashdrive = parsed.get("found_flashdrive", false)
