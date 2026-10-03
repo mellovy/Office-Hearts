@@ -17,9 +17,9 @@ A visual novel otome game set in the corporate office.
 **Goal:** Install tools, set up version control, and get a "Hello World" 2D scene running.
 
 **What was done:**
-- Installed Godot (Standard build) and created the `Soul-on-a-String` project.
+- Installed Godot (Standard build) and created the `Office-Hearts` project.
 - Added a `Node2D` root with a `Sprite2D` placeholder and confirmed the scene runs (F5) with no errors.
-- Created a private GitHub repository: [`mellovy/Soul-on-a-String`](https://github.com/mellovy/Soul-on-a-String).
+- Created a private GitHub repository: [`mellovy/Office-Hearts`](https://github.com/mellovy/Office-Hearts).
 - Initialized Git (`git init`) and added a Godot-specific `.gitignore` (ignoring `.godot/` and export folders).
 - Enabled Git LFS and tracked large binary formats: `*.png`, `*.wav`, `*.jpg`, `*.ogg`, `*.mp3`, `*.ttf`.
 - Committed and pushed the initial project setup.
