@@ -1180,8 +1180,7 @@ static func volume_row(bus_name: String = "Master") -> Control:
 
 	# Row frame (real Settings pack containers) drawn behind the row.
 	var frame := PanelContainer.new()
-	var frame_tex := TEX_MASTER_VOL if bus_name == "Master" else TEX_SOUND_VOL
-	frame.add_theme_stylebox_override("panel", tex_panel_xy(frame_tex, 50, 26, 16, 8, Color("#F5D3E6")))
+	frame.add_theme_stylebox_override("panel", panel_style(Color("#F7D9E9"), 10, Color(PINK_DEEP, 0.20), 1, false))
 	frame.add_child(row)
 	return frame
 
@@ -1504,9 +1503,9 @@ static func _value_label(t: String = "") -> Label:
 	return l
 
 
-static func _framed_row(row: Control, frame_tex: String) -> Control:
+static func _framed_row(row: Control, _frame_tex: String) -> Control: # _frame_tex is ignored
 	var frame := PanelContainer.new()
-	frame.add_theme_stylebox_override("panel", tex_panel_xy(frame_tex, 50, 26, 16, 8, Color("#F5D3E6")))
+	frame.add_theme_stylebox_override("panel", panel_style(Color("#F7D9E9"), 10, Color(PINK_DEEP, 0.20), 1, false))
 	frame.add_child(row)
 	return frame
 
