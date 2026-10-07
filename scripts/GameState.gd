@@ -1,11 +1,20 @@
 extends Node
-## Global game state: affection points, story flags, and progress tracking.
+## Global game state: affection, relationship ranks, story flags, and progress.
 ## Autoloaded as "GameState". Supports 6 manual save slots.
 
 signal points_changed(character: String, new_value: int)
 
 const SLOT_COUNT := 6
 const SAVE_PATH_FMT := "user://office_hearts_slot%d.json"
+
+const CHARACTERS: Array = ["arthur", "dante", "leo"]
+
+# Affection is capped so hub grinding can't trivially max everyone.
+const MAX_AFFECTION := 30
+
+# Relationship ranks, indexed by RANK_MIN thresholds.
+const RANKS: Array = ["Stranger", "Colleague", "Friend", "Crush", "Partner"]
+const RANK_MIN: Array = [0, 5, 10, 16, 24]
 
 var points: Dictionary = {
 	"arthur": 0,
@@ -23,6 +32,12 @@ var visited: Dictionary = {}
 # Every ending id the player has unlocked (for the flowchart + gallery).
 var endings_unlocked: Dictionary = {}
 
+# The ending most recently reached (for the end screen).
+var last_ending_id: String = ""
+
+# Arbitrary story flags set by choices (route_evidence, hub_*_done, ...).
+var flags: Dictionary = {}
+
 var found_flashdrive: bool = false
 var suspect_identified: bool = false
 
@@ -39,16 +54,58 @@ func reset_new_game() -> void:
 	current_line_idx = 0
 	visited = {}
 	endings_unlocked = {}
+	last_ending_id = ""
+	flags = {}
 	found_flashdrive = false
 	suspect_identified = false
 
 
-func add_points(character: String, amount: int) -> void:
+# ------------------------------------------------------------- affection
+
+func add_affection(character: String, amount: int) -> void:
 	if character == "":
 		return
-	points[character] = points.get(character, 0) + amount
-	points_changed.emit(character, points[character])
+	var new_value: int = int(points.get(character, 0)) + amount
+	new_value = clamp(new_value, 0, MAX_AFFECTION)
+	points[character] = new_value
+	points_changed.emit(character, new_value)
 
+
+## Back-compat alias used by older call sites.
+func add_points(character: String, amount: int) -> void:
+	add_affection(character, amount)
+
+
+func affection(character: String) -> int:
+	return int(points.get(character, 0))
+
+
+func rank_index(character: String) -> int:
+	var aff := affection(character)
+	var idx := 0
+	for i in range(RANK_MIN.size()):
+		if aff >= int(RANK_MIN[i]):
+			idx = i
+	return idx
+
+
+func rank_name(character: String) -> String:
+	return String(RANKS[rank_index(character)])
+
+
+# ------------------------------------------------------------- flags
+
+func set_flag(name: String) -> void:
+	if name == "":
+		return
+	flags[name] = true
+
+
+func has_flag(name: String) -> bool:
+	return flags.get(name, false) == true
+
+
+# ------------------------------------------------------------- progress
 
 func mark_visited(chapter_id: String) -> void:
 	visited[chapter_id] = true
@@ -56,13 +113,14 @@ func mark_visited(chapter_id: String) -> void:
 
 func mark_ending(ending_id: String) -> void:
 	endings_unlocked[ending_id] = true
+	last_ending_id = ending_id
 
 
 func get_leading_character() -> String:
 	var best := "arthur"
-	for c in points.keys():
-		if points[c] > points.get(best, 0):
-			best = c
+	for c in CHARACTERS:
+		if affection(String(c)) > affection(best):
+			best = String(c)
 	return best
 
 
@@ -107,6 +165,8 @@ func save_to_slot(slot: int) -> void:
 		"current_line_idx": current_line_idx,
 		"visited": visited,
 		"endings_unlocked": endings_unlocked,
+		"last_ending_id": last_ending_id,
+		"flags": flags,
 		"found_flashdrive": found_flashdrive,
 		"suspect_identified": suspect_identified,
 		"saved_at": Time.get_datetime_string_from_system(false, true),
@@ -136,6 +196,8 @@ func load_from_slot(slot: int) -> bool:
 	current_line_idx = int(parsed.get("current_line_idx", 0))
 	visited = parsed.get("visited", {})
 	endings_unlocked = parsed.get("endings_unlocked", {})
+	last_ending_id = String(parsed.get("last_ending_id", ""))
+	flags = parsed.get("flags", {})
 	found_flashdrive = parsed.get("found_flashdrive", false)
 	suspect_identified = parsed.get("suspect_identified", false)
 	current_slot = slot
